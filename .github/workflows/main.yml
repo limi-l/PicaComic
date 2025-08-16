@@ -40,18 +40,26 @@ jobs:
       id: bundle_id
       run: |
         echo "Attempting to read Bundle ID..."
-        BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" ios/Runner/Info.plist 2>/dev/null)
-        echo "PlistBuddy result: '$BUNDLE_ID'"
         
-        if [ -z "$BUNDLE_ID" ]; then
-          echo "PlistBuddy failed, trying plutil..."
-          BUNDLE_ID=$(plutil -convert xml1 -o - ios/Runner/Info.plist | grep -A1 CFBundleIdentifier | grep string | sed 's/<[^>]*>//g' | xargs)
-          echo "plutil result: '$BUNDLE_ID'"
+        # 首先检查 Info.plist 是否包含变量而不是实际值
+        BUNDLE_ID_RAW=$(cat ios/Runner/Info.plist | grep -A1 CFBundleIdentifier | grep string | sed 's/<[^>]*>//g' | xargs)
+        echo "Raw Bundle ID from Info.plist: '$BUNDLE_ID_RAW'"
+        
+        # 如果包含变量，从 project.pbxproj 读取
+        if [[ "$BUNDLE_ID_RAW" == *"PRODUCT_BUNDLE_IDENTIFIER"* ]] || [ -z "$BUNDLE_ID_RAW" ]; then
+          echo "Bundle ID contains variable, reading from project.pbxproj..."
+          BUNDLE_ID=$(grep "PRODUCT_BUNDLE_IDENTIFIER" ios/Runner.xcodeproj/project.pbxproj | head -1 | sed 's/.*PRODUCT_BUNDLE_IDENTIFIER = \([^;]*\);/\1/' | tr -d ' "')
+          echo "Bundle ID from pbxproj: '$BUNDLE_ID'"
+        else
+          BUNDLE_ID="$BUNDLE_ID_RAW"
         fi
         
-        if [ -z "$BUNDLE_ID" ]; then
-          echo "Setting default Bundle ID for testing"
-          BUNDLE_ID="com.example.app"
+        # 如果还是包含变量或为空，手动设置
+        if [[ "$BUNDLE_ID" == *"PRODUCT_BUNDLE_IDENTIFIER"* ]] || [ -z "$BUNDLE_ID" ]; then
+          echo "Could not resolve Bundle ID automatically. Please set BUNDLE_IDENTIFIER secret manually."
+          # 作为备选，使用一个通用的格式
+          BUNDLE_ID="com.example.runner"
+          echo "Using fallback Bundle ID: $BUNDLE_ID"
         fi
         
         echo "bundle_identifier=$BUNDLE_ID" >> $GITHUB_OUTPUT
@@ -77,6 +85,11 @@ jobs:
           exit 1
         fi
         
+        if [ -z "$FASTLANE_PASSWORD" ]; then
+          echo "Error: FASTLANE_PASSWORD is not set. Please add APPLE_PASSWORD to repository secrets."
+          exit 1
+        fi
+        
         if [ -z "$BUNDLE_ID" ]; then
           echo "Error: Bundle ID is empty"
           exit 1
@@ -96,7 +109,7 @@ jobs:
           --clean
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
-        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         BUNDLE_ID: ${{ steps.bundle_id.outputs.bundle_identifier }}
           
     - name: Upload IPA
