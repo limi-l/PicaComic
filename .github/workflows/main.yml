@@ -1,44 +1,54 @@
-name: Build_IOS
+name: Build iOS IPA
 
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: macos-13
+  build-ios:
+    runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: stable
 
-      - name: Install dependencies
-        run: flutter pub get
+    - name: Install Ruby and Fastlane
+      run: |
+        brew install ruby
+        gem install fastlane
 
-      # 🔹 修改后的步骤：在已有 post_install 里注入配置
-      - name: Patch Podfile (inject concurrency settings)
-        run: |
-          sed -i.bak '/post_install do |installer|/a \
-            \  installer.pods_project.targets.each do |target| \
-            \    target.build_configurations.each do |config| \
-            \      config.build_settings["SWIFT_STRICT_CONCURRENCY"] = "complete" \
-            \      config.build_settings["OTHER_SWIFT_FLAGS"] ||= [""] \
-            \      config.build_settings["OTHER_SWIFT_FLAGS"] << "-Xfrontend" << "-disable-availability-checking" \
-            \    end \
-            \  end \
-          ' ios/Podfile
+    - name: Flutter pub get
+      run: flutter pub get
 
-      - name: Install CocoaPods
-        run: |
-          cd ios
-          pod install --repo-update
+    - name: Build IPA using Fastlane
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      run: |
+        cd ios
 
-      - name: Build iOS app
-        run: flutter build ios --release --no-codesign
+        # 使用 fastlane 的 sigh 自动生成开发证书和 Provisioning Profile
+        fastlane run sigh \
+          app_identifier:"$(defaults read ../Runner/Info CFBundleIdentifier)" \
+          username:"$APPLE_ID" \
+          skip_certificate_verification:true \
+          development:true
+
+        # 编译 IPA
+        fastlane build_ios_app \
+          scheme:"Runner" \
+          export_method:"development" \
+          clean:true
+
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: runner-ipa
+        path: ios/build/Runner.ipa
