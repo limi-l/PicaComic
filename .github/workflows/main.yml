@@ -1,5 +1,4 @@
 name: Build iOS IPA
-
 on:
   push:
     branches:
@@ -8,47 +7,145 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
-
+    runs-on: macos-13  # 使用 macos-13 避免 Xcode 16 的 Swift 并发问题
+    
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-
+      uses: actions/checkout@v4  # 更新到 v4
+      
+    - name: Select Xcode version
+      run: |
+        sudo xcode-select --print-path
+        xcodebuild -version
+        
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
         flutter-version: stable
-
-    - name: Install Ruby and Fastlane
+        channel: stable
+        
+    - name: Clean Flutter
       run: |
-        brew install ruby
-        gem install fastlane
-
+        flutter clean
+        cd ios
+        rm -rf Pods
+        rm -f Podfile.lock
+        cd ..
+        
     - name: Flutter pub get
       run: flutter pub get
-
+      
+    # 修复 Swift 并发问题
+    - name: Patch Podfile for Swift Concurrency
+      run: |
+        # 直接替换整个 post_install 块
+        cat > ios/temp_post_install.rb << 'EOF'
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    
+    target.build_configurations.each do |config|
+      config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+      config.build_settings['SWIFT_UPCOMING_FEATURE_CONCURRENCY'] = 'NO'
+    end
+  end
+end
+EOF
+        
+        # 移除现有的 post_install 块（如果存在）
+        sed -i.bak '/post_install do |installer|/,/^end$/d' ios/Podfile
+        
+        # 添加新的 post_install 块
+        cat ios/temp_post_install.rb >> ios/Podfile
+        
+        # 清理临时文件
+        rm ios/temp_post_install.rb
+        
+        echo "Modified Podfile:"
+        cat ios/Podfile
+        
+    - name: Install CocoaPods
+      run: |
+        cd ios
+        pod install --repo-update
+        
+    - name: Install Ruby and Fastlane
+      run: |
+        # 使用系统自带的 Ruby，避免冲突
+        gem install fastlane --user-install
+        echo "$HOME/.gem/ruby/$(ruby -e 'puts RUBY_VERSION')/bin" >> $GITHUB_PATH
+        
+    - name: Get Bundle Identifier
+      id: bundle_id
+      run: |
+        # 方法1: 使用 PlistBuddy (推荐)
+        BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" ios/Runner/Info.plist)
+        
+        # 如果方法1失败，使用备用方法
+        if [ -z "$BUNDLE_ID" ] || [ "$BUNDLE_ID" = "" ]; then
+          echo "PlistBuddy failed, trying alternative method..."
+          # 方法2: 使用 plutil + grep
+          BUNDLE_ID=$(plutil -p ios/Runner/Info.plist | grep CFBundleIdentifier | cut -d'"' -f4)
+        fi
+        
+        # 如果还是失败，使用 XML 解析
+        if [ -z "$BUNDLE_ID" ] || [ "$BUNDLE_ID" = "" ]; then
+          echo "plutil failed, trying XML parsing..."
+          # 方法3: 使用 sed 解析 XML
+          BUNDLE_ID=$(sed -n '/<key>CFBundleIdentifier<\/key>/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}' ios/Runner/Info.plist)
+        fi
+        
+        # 验证是否成功获取
+        if [ -z "$BUNDLE_ID" ] || [ "$BUNDLE_ID" = "" ]; then
+          echo "Error: Failed to extract Bundle ID from Info.plist"
+          echo "Info.plist content:"
+          cat ios/Runner/Info.plist
+          exit 1
+        fi
+        
+        echo "bundle_identifier=$BUNDLE_ID" >> $GITHUB_OUTPUT
+        echo "Successfully extracted Bundle ID: $BUNDLE_ID"
+        
     - name: Build IPA using Fastlane
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       run: |
         cd ios
-
+        
+        # 检查 Bundle ID
+        echo "Using Bundle ID: ${{ steps.bundle_id.outputs.bundle_identifier }}"
+        
         # 使用 fastlane 的 sigh 自动生成开发证书和 Provisioning Profile
-        fastlane run sigh \
-          app_identifier:"$(defaults read ../Runner/Info CFBundleIdentifier)" \
-          username:"$APPLE_ID" \
-          skip_certificate_verification:true \
-          development:true
-
+        fastlane sigh \
+          --app_identifier "${{ steps.bundle_id.outputs.bundle_identifier }}" \
+          --username "$APPLE_ID" \
+          --skip_certificate_verification \
+          --development \
+          --force
+        
         # 编译 IPA
-        fastlane build_ios_app \
-          scheme:"Runner" \
-          export_method:"development" \
-          clean:true
-
+        fastlane gym \
+          --scheme "Runner" \
+          --export_method "development" \
+          --clean \
+          --output_directory "./build" \
+          --output_name "Runner.ipa"
+          
     - name: Upload IPA artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # 更新到 v4
+      if: success()
       with:
-        name: runner-ipa
+        name: runner-ipa-${{ github.run_number }}
         path: ios/build/Runner.ipa
+        retention-days: 30
+        
+    - name: Upload build logs (on failure)
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: build-logs-${{ github.run_number }}
+        path: |
+          ios/fastlane/logs/
+          ~/Library/Logs/gym/
+        retention-days: 7
