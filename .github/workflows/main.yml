@@ -56,8 +56,7 @@ jobs:
         
         # 如果还是包含变量或为空，手动设置
         if [[ "$BUNDLE_ID" == *"PRODUCT_BUNDLE_IDENTIFIER"* ]] || [ -z "$BUNDLE_ID" ]; then
-          echo "Could not resolve Bundle ID automatically. Please set BUNDLE_IDENTIFIER secret manually."
-          # 作为备选，使用一个通用的格式
+          echo "Could not resolve Bundle ID automatically."
           BUNDLE_ID="com.example.runner"
           echo "Using fallback Bundle ID: $BUNDLE_ID"
         fi
@@ -65,20 +64,12 @@ jobs:
         echo "bundle_identifier=$BUNDLE_ID" >> $GITHUB_OUTPUT
         echo "Final Bundle ID: $BUNDLE_ID"
         
-    - name: Debug secrets
-      run: |
-        echo "Checking secrets availability:"
-        echo "APPLE_ID length: ${#APPLE_ID}"
-        echo "APPLE_PASSWORD length: ${#APPLE_PASSWORD}"
-      env:
-        APPLE_ID: ${{ secrets.APPLE_ID }}
-        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        
     - name: Build IPA
       run: |
         cd ios
         echo "Bundle ID: $BUNDLE_ID"
         echo "Apple ID: $APPLE_ID"
+        echo "Password set: $([[ -n $FASTLANE_PASSWORD ]] && echo 'yes' || echo 'no')"
         
         if [ -z "$APPLE_ID" ]; then
           echo "Error: APPLE_ID is not set. Please add it to repository secrets."
@@ -86,7 +77,7 @@ jobs:
         fi
         
         if [ -z "$FASTLANE_PASSWORD" ]; then
-          echo "Error: FASTLANE_PASSWORD is not set. Please add APPLE_PASSWORD to repository secrets."
+          echo "Error: FASTLANE_PASSWORD is not set. Please check APPLE_PASSWORD secret."
           exit 1
         fi
         
@@ -106,7 +97,9 @@ jobs:
         fastlane gym \
           --scheme "Runner" \
           --export_method "development" \
-          --clean
+          --clean \
+          --output_directory "./build" \
+          --output_name "Runner.ipa"
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -116,5 +109,5 @@ jobs:
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: runner-ipa
+        name: runner-ipa-${{ github.run_number }}
         path: ios/build/Runner.ipa
