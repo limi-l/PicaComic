@@ -70,7 +70,7 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> implements PopEntry{
+class _SettingsPageState extends State<SettingsPage> {
   int currentPage = -1;
 
   ColorScheme get colors => Theme.of(context).colorScheme;
@@ -94,18 +94,7 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
 
   late final HorizontalDragGestureRecognizer gestureRecognizer;
 
-  ModalRoute? _route;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final ModalRoute<dynamic>? nextRoute = ModalRoute.of(context);
-    if (nextRoute != _route) {
-      _route?.unregisterPopEntry(this);
-      _route = nextRoute;
-      _route?.registerPopEntry(this);
-    }
-  }
 
   @override
   void initState() {
@@ -159,20 +148,31 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
     super.dispose();
     gestureRecognizer.dispose();
     App.temporaryDisablePopGesture = false;
-    _route?.unregisterPopEntry(this);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (currentPage != -1 && !enableTwoViews) {
-      canPop.value = false;
+    final canPop = currentPage == -1 || enableTwoViews;
+
+    if (!canPop) {
       App.temporaryDisablePopGesture = true;
     } else {
-      canPop.value = true;
       App.temporaryDisablePopGesture = false;
     }
-    return Material(
-      child: buildBody(),
+
+    return PopScope(
+      canPop: canPop,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        if (currentPage != -1) {
+          setState(() {
+            currentPage = -1;
+          });
+        }
+      },
+      child: Material(
+        child: buildBody(),
+      ),
     );
   }
 
