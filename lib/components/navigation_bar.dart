@@ -604,44 +604,24 @@ class NaviObserver extends NavigatorObserver implements Listenable {
 
 class _NaviPopScope extends StatelessWidget {
   const _NaviPopScope(
-      {required this.child, this.popGesture = false, required this.action});
+      {required this.child, required this.action, required this.popGesture});
 
   final Widget child;
-  final bool popGesture;
-  final VoidCallback action;
 
-  static bool panStartAtEdge = false;
+  final void Function() action;
+
+  final bool popGesture;
 
   @override
   Widget build(BuildContext context) {
-    Widget res = App.isIOS
-        ? child
-        : PopScope(
-            canPop: App.isAndroid ? false : true,
-            onPopInvokedWithResult: (value, result) {
-              action();
-            },
-            child: child,
-          );
-    if (popGesture) {
-      res = GestureDetector(
-          onPanStart: (details) {
-            if (details.globalPosition.dx < 64) {
-              panStartAtEdge = true;
-            }
-          },
-          onPanEnd: (details) {
-            if (details.velocity.pixelsPerSecond.dx < 0 ||
-                details.velocity.pixelsPerSecond.dx > 0) {
-              if (panStartAtEdge) {
-                action();
-              }
-            }
-            panStartAtEdge = false;
-          },
-          child: res);
-    }
-    return res;
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (bool didPop) {
+        if (didPop) return;
+        action();
+      },
+      child: child,
+    );
   }
 }
 
