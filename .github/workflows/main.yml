@@ -1,4 +1,4 @@
-name: Build iOS IPA
+name: Build iOS IPA (No Signing)
 
 on:
   push:
@@ -19,36 +19,33 @@ jobs:
       with:
         flutter-version: stable
 
-    - name: Install Ruby and Fastlane
-      run: |
-        brew install ruby
-        gem install fastlane
+    - name: Install CocoaPods
+      run: sudo gem install cocoapods
 
     - name: Flutter pub get
       run: flutter pub get
 
-    - name: Build IPA using Fastlane
-      env:
-        APPLE_ID: ${{ secrets.APPLE_ID }}
-        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+    - name: Build iOS (no code sign)
+      run: flutter build ios --release --no-codesign
+
+    - name: Archive IPA (no signing)
       run: |
-        cd ios
+        mkdir -p build/ipa
+        xcodebuild -workspace ios/Runner.xcworkspace \
+                   -scheme Runner \
+                   -configuration Release \
+                   -sdk iphoneos \
+                   -archivePath build/Runner.xcarchive archive \
+                   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
-        # 使用 fastlane 的 sigh 自动生成开发证书和 Provisioning Profile
-        fastlane run sigh \
-          app_identifier:"$(defaults read ../Runner/Info CFBundleIdentifier)" \
-          username:"$APPLE_ID" \
-          skip_certificate_verification:true \
-          development:true
-
-        # 编译 IPA
-        fastlane build_ios_app \
-          scheme:"Runner" \
-          export_method:"development" \
-          clean:true
+        xcodebuild -exportArchive \
+                   -archivePath build/Runner.xcarchive \
+                   -exportOptionsPlist ios/ExportOptions.plist \
+                   -exportPath build/ipa \
+                   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
     - name: Upload IPA artifact
       uses: actions/upload-artifact@v3
       with:
-        name: runner-ipa
-        path: ios/build/Runner.ipa
+        name: unsigned-ipa
+        path: build/ipa/*.ipa
