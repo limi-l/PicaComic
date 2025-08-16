@@ -1,51 +1,36 @@
-name: Build iOS IPA (No Signing)
+name: Build iOS IPA
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
-  build-ios:
+  build:
     runs-on: macos-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: stable
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
 
-    - name: Install CocoaPods
-      run: sudo gem install cocoapods
+      - name: Install dependencies
+        run: flutter pub get
 
-    - name: Flutter pub get
-      run: flutter pub get
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
 
-    - name: Build iOS (no code sign)
-      run: flutter build ios --release --no-codesign
+      - name: Create IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir Payload
+          cp -r Runner.app Payload/
+          zip -r app.ipa Payload
 
-    - name: Archive IPA (no signing)
-      run: |
-        mkdir -p build/ipa
-        xcodebuild -workspace ios/Runner.xcworkspace \
-                   -scheme Runner \
-                   -configuration Release \
-                   -sdk iphoneos \
-                   -archivePath build/Runner.xcarchive archive \
-                   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-
-        xcodebuild -exportArchive \
-                   -archivePath build/Runner.xcarchive \
-                   -exportOptionsPlist ios/ExportOptions.plist \
-                   -exportPath build/ipa \
-                   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-
-    - name: Upload IPA artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: unsigned-ipa
-        path: build/ipa/*.ipa
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build
+          path: build/ios/iphoneos/app.ipa
