@@ -36,7 +36,22 @@ jobs:
         echo "Content:"
         cat ios/Runner/Info.plist
         
-    - name: Get Bundle ID
+    - name: Debug secrets and environment
+      run: |
+        echo "Checking secrets availability:"
+        echo "APPLE_ID set: $([[ -n $APPLE_ID ]] && echo 'yes' || echo 'no')"
+        echo "APPLE_PASSWORD set: $([[ -n $APPLE_PASSWORD ]] && echo 'yes' || echo 'no')"
+        echo "FASTLANE_PASSWORD set: $([[ -n $FASTLANE_PASSWORD ]] && echo 'yes' || echo 'no')"
+        if [[ -n $APPLE_PASSWORD ]]; then
+          echo "APPLE_PASSWORD length: ${#APPLE_PASSWORD}"
+        fi
+        if [[ -n $FASTLANE_PASSWORD ]]; then
+          echo "FASTLANE_PASSWORD length: ${#FASTLANE_PASSWORD}"
+        fi
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       id: bundle_id
       run: |
         echo "Attempting to read Bundle ID..."
@@ -72,12 +87,7 @@ jobs:
         echo "Password set: $([[ -n $FASTLANE_PASSWORD ]] && echo 'yes' || echo 'no')"
         
         if [ -z "$APPLE_ID" ]; then
-          echo "Error: APPLE_ID is not set. Please add it to repository secrets."
-          exit 1
-        fi
-        
-        if [ -z "$FASTLANE_PASSWORD" ]; then
-          echo "Error: FASTLANE_PASSWORD is not set. Please check APPLE_PASSWORD secret."
+          echo "Error: APPLE_ID is not set."
           exit 1
         fi
         
@@ -86,28 +96,25 @@ jobs:
           exit 1
         fi
         
-        echo "Running fastlane sigh..."
-        fastlane sigh \
-          --app_identifier "$BUNDLE_ID" \
-          --username "$APPLE_ID" \
-          --development \
-          --force
+        # 尝试不使用证书签名的构建
+        echo "Building iOS app without code signing first..."
+        cd ..
+        flutter build ios --release --no-codesign
         
-        echo "Building with gym..."
-        fastlane gym \
-          --scheme "Runner" \
-          --export_method "development" \
-          --clean \
-          --output_directory "./build" \
-          --output_name "Runner.ipa"
+        # 检查构建是否成功
+        if [ -d "build/ios/iphoneos/Runner.app" ]; then
+          echo "iOS app built successfully without signing"
+          ls -la build/ios/iphoneos/
+        else
+          echo "iOS build failed"
+          exit 1
+        fi
       env:
-        APPLE_ID: ${{ secrets.APPLE_ID }}
-        FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         BUNDLE_ID: ${{ steps.bundle_id.outputs.bundle_identifier }}
           
-    - name: Upload IPA
+    - name: Upload unsigned iOS app
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: runner-ipa-${{ github.run_number }}
-        path: ios/build/Runner.ipa
+        name: unsigned-ios-app-${{ github.run_number }}
+        path: build/ios/iphoneos/Runner.app
