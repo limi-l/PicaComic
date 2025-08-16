@@ -22,21 +22,18 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 🔹 新增步骤：补丁 Podfile
-      - name: Patch Podfile to relax Swift concurrency checks
+      # 🔹 修改后的步骤：在已有 post_install 里注入配置
+      - name: Patch Podfile (inject concurrency settings)
         run: |
-          cat << 'EOF' >> ios/Podfile
-
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'complete'
-                config.build_settings['OTHER_SWIFT_FLAGS'] ||= ['']
-                config.build_settings['OTHER_SWIFT_FLAGS'] << '-Xfrontend' << '-disable-availability-checking'
-              end
-            end
-          end
-          EOF
+          sed -i.bak '/post_install do |installer|/a \
+            \  installer.pods_project.targets.each do |target| \
+            \    target.build_configurations.each do |config| \
+            \      config.build_settings["SWIFT_STRICT_CONCURRENCY"] = "complete" \
+            \      config.build_settings["OTHER_SWIFT_FLAGS"] ||= [""] \
+            \      config.build_settings["OTHER_SWIFT_FLAGS"] << "-Xfrontend" << "-disable-availability-checking" \
+            \    end \
+            \  end \
+          ' ios/Podfile
 
       - name: Install CocoaPods
         run: |
