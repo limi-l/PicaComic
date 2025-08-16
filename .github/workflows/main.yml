@@ -16,30 +16,92 @@ jobs:
       with:
         channel: stable
         
-    - run: flutter clean && flutter pub get
+    - name: Clean and get dependencies
+      run: |
+        flutter clean
+        flutter pub get
         
-    - run: |
+    - name: Install pods
+      run: |
         cd ios
         pod install
         
-    - run: gem install fastlane
+    - name: Install fastlane
+      run: gem install fastlane
+      
+    - name: Debug Info.plist
+      run: |
+        echo "Checking Info.plist file:"
+        ls -la ios/Runner/Info.plist
+        echo "Content:"
+        cat ios/Runner/Info.plist
         
     - name: Get Bundle ID
       id: bundle_id
       run: |
-        BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" ios/Runner/Info.plist)
-        echo "bundle_identifier=$BUNDLE_ID" >> $GITHUB_OUTPUT
+        echo "Attempting to read Bundle ID..."
+        BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" ios/Runner/Info.plist 2>/dev/null)
+        echo "PlistBuddy result: '$BUNDLE_ID'"
         
-    - name: Build IPA
+        if [ -z "$BUNDLE_ID" ]; then
+          echo "PlistBuddy failed, trying plutil..."
+          BUNDLE_ID=$(plutil -convert xml1 -o - ios/Runner/Info.plist | grep -A1 CFBundleIdentifier | grep string | sed 's/<[^>]*>//g' | xargs)
+          echo "plutil result: '$BUNDLE_ID'"
+        fi
+        
+        if [ -z "$BUNDLE_ID" ]; then
+          echo "Setting default Bundle ID for testing"
+          BUNDLE_ID="com.example.app"
+        fi
+        
+        echo "bundle_identifier=$BUNDLE_ID" >> $GITHUB_OUTPUT
+        echo "Final Bundle ID: $BUNDLE_ID"
+        
+    - name: Debug secrets
+      run: |
+        echo "Checking secrets availability:"
+        echo "APPLE_ID length: ${#APPLE_ID}"
+        echo "APPLE_PASSWORD length: ${#APPLE_PASSWORD}"
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        
+    - name: Build IPA
       run: |
         cd ios
-        fastlane sigh --app_identifier "${{ steps.bundle_id.outputs.bundle_identifier }}" --username "$APPLE_ID" --development --force
-        fastlane gym --scheme "Runner" --export_method "development" --clean
+        echo "Bundle ID: $BUNDLE_ID"
+        echo "Apple ID: $APPLE_ID"
+        
+        if [ -z "$APPLE_ID" ]; then
+          echo "Error: APPLE_ID is not set. Please add it to repository secrets."
+          exit 1
+        fi
+        
+        if [ -z "$BUNDLE_ID" ]; then
+          echo "Error: Bundle ID is empty"
+          exit 1
+        fi
+        
+        echo "Running fastlane sigh..."
+        fastlane sigh \
+          --app_identifier "$BUNDLE_ID" \
+          --username "$APPLE_ID" \
+          --development \
+          --force
+        
+        echo "Building with gym..."
+        fastlane gym \
+          --scheme "Runner" \
+          --export_method "development" \
+          --clean
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        BUNDLE_ID: ${{ steps.bundle_id.outputs.bundle_identifier }}
           
-    - uses: actions/upload-artifact@v4
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: runner-ipa
         path: ios/build/Runner.ipa
