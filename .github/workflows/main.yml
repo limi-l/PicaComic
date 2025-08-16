@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:   # 👈 允许手动触发
 
 jobs:
   build:
@@ -17,19 +18,22 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0' # 根据你的项目版本调整
+          flutter-version: '3.22.0'
 
       - name: Install dependencies
         run: flutter pub get
 
-      # 👇 关键步骤：对 local_auth_darwin 插件代码打补丁
       - name: Patch local_auth_darwin
         run: |
           SWIFT_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/local_auth_darwin-*/Sources/local_auth_darwin/LocalAuthPlugin.swift" | head -n 1)
           echo "Patching $SWIFT_FILE"
           if [ -f "$SWIFT_FILE" ]; then
-            # 将 Task { 替换为 Task { [weak self] in
-            sed -i.bak 's/Task {/Task { [weak self] in\n    guard let self = self else { return }/' "$SWIFT_FILE"
+            if ! grep -q "\[weak self\]" "$SWIFT_FILE"; then
+              sed -i.bak 's/Task {/Task { [weak self] in\n    guard let self = self else { return }/' "$SWIFT_FILE"
+              echo "✅ Patch applied"
+            else
+              echo "⚡ Patch already applied, skipping"
+            fi
           else
             echo "❌ LocalAuthPlugin.swift not found"
             exit 1
