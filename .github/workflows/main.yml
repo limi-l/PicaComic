@@ -1,41 +1,39 @@
-name: Build IOS
-run-name: Build IOS
+name: Build iOS App
+
 on:
-  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+  pull_request:
+
 jobs:
-  Build_IOS:
-    runs-on: macos-13
+  build:
+    runs-on: macos-latest
+
     steps:
-    - uses: actions/checkout@v3
-    - uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        architecture: x64
-    - run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
-    - run: flutter pub get
-    - run: flutter build ios --release --no-codesign
-    - run: |
-        mkdir -p /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/Payload
-        mv /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/Runner.app /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/Payload
-        cd /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/
-        zip -r app-ios.ipa Payload
-    - uses: actions/upload-artifact@v4
-      with:
-        name: app-ios.ipa
-        path: /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/app-ios.ipa
-  Build_MacOS:
-    runs-on: macos-13
-    steps:
-    - uses: actions/checkout@v3
-    - uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        architecture: x64
-    - run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
-    - run: flutter pub get
-    - run: flutter build macos --release
-    - uses: actions/upload-artifact@v4
-      with:
-        name: macos-build.zip
-        path: build/macos/Build/Products/Release/pica_comic.app
- 
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0' # 根据你的项目版本调整
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 👇 关键步骤：对 local_auth_darwin 插件代码打补丁
+      - name: Patch local_auth_darwin
+        run: |
+          SWIFT_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/local_auth_darwin-*/Sources/local_auth_darwin/LocalAuthPlugin.swift" | head -n 1)
+          echo "Patching $SWIFT_FILE"
+          if [ -f "$SWIFT_FILE" ]; then
+            # 将 Task { 替换为 Task { [weak self] in
+            sed -i.bak 's/Task {/Task { [weak self] in\n    guard let self = self else { return }/' "$SWIFT_FILE"
+          else
+            echo "❌ LocalAuthPlugin.swift not found"
+            exit 1
+          fi
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
