@@ -1,41 +1,47 @@
-name: Build IOS
-run-name: Build IOS
+name: Build_IOS
+
 on:
-  workflow_dispatch: {}
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
 jobs:
-  Build_IOS:
+  build:
     runs-on: macos-13
+
     steps:
-    - uses: actions/checkout@v3
-    - uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        architecture: x64
-    - run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
-    - run: flutter pub get
-    - run: flutter build ios --release --no-codesign
-    - run: |
-        mkdir -p /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/Payload
-        mv /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/Runner.app /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/Payload
-        cd /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/
-        zip -r app-ios.ipa Payload
-    - uses: actions/upload-artifact@v4
-      with:
-        name: app-ios.ipa
-        path: /Users/runner/work/PicaComic/PicaComic/build/ios/iphoneos/app-ios.ipa
-  Build_MacOS:
-    runs-on: macos-13
-    steps:
-    - uses: actions/checkout@v3
-    - uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        architecture: x64
-    - run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
-    - run: flutter pub get
-    - run: flutter build macos --release
-    - uses: actions/upload-artifact@v4
-      with:
-        name: macos-build.zip
-        path: build/macos/Build/Products/Release/pica_comic.app
- 
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 🔹 新增步骤：补丁 Podfile
+      - name: Patch Podfile to relax Swift concurrency checks
+        run: |
+          cat << 'EOF' >> ios/Podfile
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'complete'
+                config.build_settings['OTHER_SWIFT_FLAGS'] ||= ['']
+                config.build_settings['OTHER_SWIFT_FLAGS'] << '-Xfrontend' << '-disable-availability-checking'
+              end
+            end
+          end
+          EOF
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build iOS app
+        run: flutter build ios --release --no-codesign
