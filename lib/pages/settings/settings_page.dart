@@ -716,12 +716,5 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
     }
   }
 
-  @override
-  void onPopInvoked(bool didPop) {
-    if (currentPage != -1) {
-      setState(() {
-        currentPage = -1;
-      });
-    }
-  }
+
 }
