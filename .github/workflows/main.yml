@@ -23,21 +23,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Patch local_auth_darwin
-        run: |
-          SWIFT_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/local_auth_darwin-*/Sources/local_auth_darwin/LocalAuthPlugin.swift" | head -n 1)
-          echo "Patching $SWIFT_FILE"
-          if [ -f "$SWIFT_FILE" ]; then
-            if ! grep -q "\[weak self\]" "$SWIFT_FILE"; then
-              sed -i.bak 's/Task {/Task { [weak self] in\n    guard let self = self else { return }/' "$SWIFT_FILE"
-              echo "✅ Patch applied"
-            else
-              echo "⚡ Patch already applied, skipping"
-            fi
-          else
-            echo "❌ LocalAuthPlugin.swift not found"
-            exit 1
-          fi
 
       - name: Build iOS (no codesign)
         run: flutter build ios --release --no-codesign
