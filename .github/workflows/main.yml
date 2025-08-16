@@ -2,119 +2,53 @@ name: Build iOS IPA
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build-ios:
-    runs-on: macos-13
-    
+    runs-on: macos-latest
+
     steps:
-    - uses: actions/checkout@v4
-      
-    - uses: subosito/flutter-action@v2
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
       with:
-        channel: stable
-        
-    - name: Clean and get dependencies
+        flutter-version: stable
+
+    - name: Install Ruby and Fastlane
       run: |
-        flutter clean
-        flutter pub get
-        
-    - name: Install pods
-      run: |
-        cd ios
-        pod install
-        
-    - name: Install fastlane
-      run: gem install fastlane
-      
-    - name: Debug Info.plist
-      run: |
-        echo "Checking Info.plist file:"
-        ls -la ios/Runner/Info.plist
-        echo "Content:"
-        cat ios/Runner/Info.plist
-        
-    - name: Debug secrets and environment
-      run: |
-        echo "Checking secrets availability:"
-        echo "APPLE_ID set: $([[ -n $APPLE_ID ]] && echo 'yes' || echo 'no')"
-        echo "APPLE_PASSWORD set: $([[ -n $APPLE_PASSWORD ]] && echo 'yes' || echo 'no')"
-        echo "FASTLANE_PASSWORD set: $([[ -n $FASTLANE_PASSWORD ]] && echo 'yes' || echo 'no')"
-        if [[ -n $APPLE_PASSWORD ]]; then
-          echo "APPLE_PASSWORD length: ${#APPLE_PASSWORD}"
-        fi
-        if [[ -n $FASTLANE_PASSWORD ]]; then
-          echo "FASTLANE_PASSWORD length: ${#FASTLANE_PASSWORD}"
-        fi
+        brew install ruby
+        gem install fastlane
+
+    - name: Flutter pub get
+      run: flutter pub get
+
+    - name: Build IPA using Fastlane
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      id: bundle_id
-      run: |
-        echo "Attempting to read Bundle ID..."
-        
-        # 首先检查 Info.plist 是否包含变量而不是实际值
-        BUNDLE_ID_RAW=$(cat ios/Runner/Info.plist | grep -A1 CFBundleIdentifier | grep string | sed 's/<[^>]*>//g' | xargs)
-        echo "Raw Bundle ID from Info.plist: '$BUNDLE_ID_RAW'"
-        
-        # 如果包含变量，从 project.pbxproj 读取
-        if [[ "$BUNDLE_ID_RAW" == *"PRODUCT_BUNDLE_IDENTIFIER"* ]] || [ -z "$BUNDLE_ID_RAW" ]; then
-          echo "Bundle ID contains variable, reading from project.pbxproj..."
-          BUNDLE_ID=$(grep "PRODUCT_BUNDLE_IDENTIFIER" ios/Runner.xcodeproj/project.pbxproj | head -1 | sed 's/.*PRODUCT_BUNDLE_IDENTIFIER = \([^;]*\);/\1/' | tr -d ' "')
-          echo "Bundle ID from pbxproj: '$BUNDLE_ID'"
-        else
-          BUNDLE_ID="$BUNDLE_ID_RAW"
-        fi
-        
-        # 如果还是包含变量或为空，手动设置
-        if [[ "$BUNDLE_ID" == *"PRODUCT_BUNDLE_IDENTIFIER"* ]] || [ -z "$BUNDLE_ID" ]; then
-          echo "Could not resolve Bundle ID automatically."
-          BUNDLE_ID="com.example.runner"
-          echo "Using fallback Bundle ID: $BUNDLE_ID"
-        fi
-        
-        echo "bundle_identifier=$BUNDLE_ID" >> $GITHUB_OUTPUT
-        echo "Final Bundle ID: $BUNDLE_ID"
-        
-    - name: Build IPA
       run: |
         cd ios
-        echo "Bundle ID: $BUNDLE_ID"
-        echo "Apple ID: $APPLE_ID"
-        echo "Password set: $([[ -n $FASTLANE_PASSWORD ]] && echo 'yes' || echo 'no')"
-        
-        if [ -z "$APPLE_ID" ]; then
-          echo "Error: APPLE_ID is not set."
-          exit 1
-        fi
-        
-        if [ -z "$BUNDLE_ID" ]; then
-          echo "Error: Bundle ID is empty"
-          exit 1
-        fi
-        
-        # 尝试不使用证书签名的构建
-        echo "Building iOS app without code signing first..."
-        cd ..
-        flutter build ios --release --no-codesign
-        
-        # 检查构建是否成功
-        if [ -d "build/ios/iphoneos/Runner.app" ]; then
-          echo "iOS app built successfully without signing"
-          ls -la build/ios/iphoneos/
-        else
-          echo "iOS build failed"
-          exit 1
-        fi
-      env:
-        BUNDLE_ID: ${{ steps.bundle_id.outputs.bundle_identifier }}
-          
-    - name: Upload unsigned iOS app
-      uses: actions/upload-artifact@v4
-      if: success()
+
+        # 使用 fastlane 的 sigh 自动生成开发证书和 Provisioning Profile
+        fastlane run sigh \
+          app_identifier:"$(defaults read ../Runner/Info CFBundleIdentifier)" \
+          username:"$APPLE_ID" \
+          skip_certificate_verification:true \
+          development:true
+
+        # 编译 IPA
+        fastlane build_ios_app \
+          scheme:"Runner" \
+          export_method:"development" \
+          clean:true
+
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v3
       with:
-        name: unsigned-ios-app-${{ github.run_number }}
-        path: build/ios/iphoneos/Runner.app
+        name: runner-ipa
+        path: ios/build/Runner.ipa
