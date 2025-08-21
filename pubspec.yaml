@@ -90,7 +90,7 @@ dependencies:
       path: packages/desktop_webview_window
       ref: 7801fc5
   flutter_inappwebview:
-      flutter_inappwebview: ^6.0.0
+      flutter_inappwebview: 6.1.0
 
 dev_dependencies:
   flutter_test:
